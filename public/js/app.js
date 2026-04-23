@@ -17,6 +17,89 @@ async function api(path, options){
 
 function escapeAttr(s){ return String(s||'').replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function buildSafeEmailSrcdoc(rawHtml) {
+  const content = String(rawHtml || '');
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base target="_blank">
+  <style>
+    :root { color-scheme: light; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff !important;
+      color: #1e293b !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    body, p, span, div, td, th, li { color: #1e293b !important; }
+    a { color: #2563eb !important; }
+    pre, code {
+      color: #1e293b !important;
+      background: #f1f5f9 !important;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    img, table { max-width: 100% !important; }
+  </style>
+</head>
+<body>${content}</body>
+</html>`;
+}
+
+function renderEmailBodyHost(host, rawHtml, rawText) {
+  if (!host) {
+    return;
+  }
+  host.innerHTML = '';
+  const html = String(rawHtml || '');
+  const text = String(rawText || '');
+  if (html.trim()) {
+    const iframe = document.createElement('iframe');
+    iframe.style.width = '100%';
+    iframe.style.border = '0';
+    iframe.style.minHeight = '60vh';
+    iframe.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    iframe.srcdoc = buildSafeEmailSrcdoc(html);
+    host.appendChild(iframe);
+
+    const resize = () => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        const h = Math.max(
+          doc?.body?.scrollHeight || 0,
+          doc?.documentElement?.scrollHeight || 0,
+          400
+        );
+        iframe.style.height = h + 'px';
+      } catch (_) { }
+    };
+    iframe.addEventListener('load', resize);
+    setTimeout(resize, 80);
+    return;
+  }
+  if (text.trim()) {
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.wordBreak = 'break-word';
+    pre.style.color = 'var(--text)';
+    pre.style.background = 'var(--surface)';
+    pre.style.padding = '1rem';
+    pre.style.borderRadius = '8px';
+    pre.textContent = text;
+    host.appendChild(pre);
+    return;
+  }
+  host.innerHTML = '<div class="email-no-content">📭 此邮件暂无内容</div>';
+}
+
 // 将 D1 返回的 UTC 时间（YYYY-MM-DD HH:MM:SS）格式化为东八区显示
 function formatTs(ts){
   if (!ts || typeof ts !== 'string') return '';
@@ -1030,12 +1113,13 @@ async function refresh(){
       emails = await r.json();
     }finally{ clearTimeout(timeout); }
     if (!Array.isArray(emails) || emails.length===0) { 
-      els.list.innerHTML = '<div style="text-align:center;color:#64748b">📭 暂无邮件</div>'; 
+      els.list.innerHTML = '<div style="text-align:center;color:var(--text-muted)">📭 暂无邮件</div>'; 
       if (els.pager) els.pager.style.display = 'none';
       return; 
     }
     // 分页切片
     const pageItems = sliceByPage(emails);
+    const useMobileTimeLayout = !!(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
     els.list.innerHTML = pageItems.map(e => {
       // 智能内容预览处理（优先使用后端 preview ）
       let rawContent = isSentView ? (e.text_content || e.html_content || '') : (e.preview || e.content || e.html_content || '');
@@ -1064,7 +1148,6 @@ async function refresh(){
         const fallback = (e.verification_code || '').toString().trim() || extractCode(rawContent || '');
         if (fallback) listCode = String(fallback);
       }
-      const escapeHtml = (s)=>String(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]||c));
       const senderText = escapeHtml(e.sender || '');
       // 发件箱：显示收件人（最多2个，多余以“等N人”提示）
       let recipientsDisplay = '';
@@ -1089,7 +1172,7 @@ async function refresh(){
            <span class="meta-from"><span class="meta-label">${metaLabel}</span><span class="meta-from-text">${metaText}</span></span>
            <span class="email-time">
              <span class="time-icon">🕐</span>
-             ${window.matchMedia && window.matchMedia('(max-width: 900px)').matches ? formatTsMobile(e.received_at || e.created_at) : formatTs(e.received_at || e.created_at)}
+             ${useMobileTimeLayout ? formatTsMobile(e.received_at || e.created_at) : formatTs(e.received_at || e.created_at)}
            </span>
          </div>
          <div class="email-content">
@@ -1105,7 +1188,7 @@ async function refresh(){
                   ${listCode ? `<span class="code-tag">${escapeHtml(listCode)}</span>` : ''}
                   <span class="preview-text">${previewText}</span>
                 </span>
-              ` : '<span class="email-preview value-text" style="color:#94a3b8">(暂无预览)</span>'}
+              ` : '<span class="email-preview value-text" style="color:var(--text-muted)">(暂无预览)</span>'}
             </div>
            </div>
            <div class="email-actions">
@@ -1166,7 +1249,7 @@ window.showEmail = async (id) => {
     }
     els.modalSubject.innerHTML = `
       <span class="modal-icon">📧</span>
-      <span>${email.subject || '(无主题)'}</span>
+      <span>${escapeHtml(email.subject || '(无主题)')}</span>
     `;
     
     // 原样展示：优先 html_content 以 iframe 渲染；无 HTML 时以纯文本显示
@@ -1175,17 +1258,18 @@ window.showEmail = async (id) => {
     const plainForCode = `${email.subject || ''} ` + (rawHtml || rawText).replace(/<[^>]+>/g, ' ').replace(/\s+/g,' ').trim();
     const code = extractCode(plainForCode);
     const downloadBtn = email.download ? `
-      <a class="btn btn-ghost btn-sm" href="${email.download}" download>
+      <a class="btn btn-ghost btn-sm" href="${escapeAttr(email.download)}" download rel="noreferrer noopener">
         <span class="btn-icon">⬇️</span>
         <span>下载原始邮件</span>
       </a>` : '';
-    const toLine = (email.to_addrs || email.recipients || '').toString();
+    const senderLine = escapeHtml((email.sender || '').toString());
+    const toLine = escapeHtml((email.to_addrs || email.recipients || '').toString());
     const timeLine = formatTs(email.received_at || email.created_at);
-    const subjLine = (email.subject || '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] || c));
+    const subjLine = escapeHtml((email.subject || '').toString());
 
     els.modalContent.innerHTML = `
-      <div class="email-meta-inline" style="margin:4px 0 8px 0;color:#334155;font-size:14px">
-        <span>发件人：${email.sender || ''}</span>
+      <div class="email-meta-inline" style="margin:4px 0 8px 0;color:var(--text);font-size:14px">
+        <span>发件人：${senderLine}</span>
         ${toLine ? `<span style=\"margin-left:12px\">收件人：${toLine}</span>` : ''}
         ${timeLine ? `<span style=\"margin-left:12px\">时间：${timeLine}</span>` : ''}
         ${subjLine ? `<span style=\"margin-left:12px\">主题：${subjLine}</span>` : ''}
@@ -1205,72 +1289,7 @@ window.showEmail = async (id) => {
     `;
 
     const host = document.getElementById('email-render-host');
-    if (rawHtml.trim()){
-      const iframe = document.createElement('iframe');
-      iframe.style.width = '100%';
-      iframe.style.border = '0';
-      iframe.style.minHeight = '60vh';
-      host.appendChild(iframe);
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc){
-        doc.open();
-        doc.write(rawHtml);
-        doc.close();
-        try {
-          const style = doc.createElement('style');
-          // 邮件正文统一为“白纸黑字”，避免深色主题下邮件自带深色字看不清
-          const bgColor = '#ffffff';
-          const textColor = '#1e293b';
-          const linkColor = '#2563eb';
-          const codeBg = '#f1f5f9';
-          style.textContent = `
-            body {
-              background: ${bgColor} !important;
-              color: ${textColor} !important;
-            }
-            body, p, span, div, td, th, li {
-              color: ${textColor} !important;
-            }
-            a {
-              color: ${linkColor} !important;
-            }
-            pre, code {
-              color: ${textColor} !important;
-              background: ${codeBg} !important;
-            }
-          `;
-          if (doc.head) {
-            doc.head.appendChild(style);
-          } else if (doc.body) {
-            doc.body.insertBefore(style, doc.body.firstChild || null);
-          }
-        } catch (_) {}
-        const resize = () => {
-          try{
-            const h = Math.max(
-              doc.body?.scrollHeight || 0,
-              doc.documentElement?.scrollHeight || 0,
-              400
-            );
-            iframe.style.height = h + 'px';
-          }catch(_){ }
-        };
-        iframe.onload = resize;
-        setTimeout(resize, 60);
-      }
-    } else if (rawText.trim()){
-      const pre = document.createElement('pre');
-      pre.style.whiteSpace = 'pre-wrap';
-      pre.style.wordBreak = 'break-word';
-      pre.style.color = '#1e293b';
-      pre.style.background = '#ffffff';
-      pre.style.padding = '1rem';
-      pre.style.borderRadius = '8px';
-      pre.textContent = rawText;
-      host.appendChild(pre);
-    } else {
-      host.innerHTML = '<div class="email-no-content">📭 此邮件暂无内容</div>';
-    }
+    renderEmailBodyHost(host, rawHtml, rawText);
     els.modal.classList.add('show');
     await refresh();
   } catch (e){ /* redirected */ }
@@ -1634,11 +1653,11 @@ async function loadMailboxes(options = {}){
                 tip = document.createElement('div');
                 tip.id = 'tg-guest-tip';
                 tip.className = 'field-hint';
-                tip.style.color = '#0ea5e9'; // 蓝色提示
+                tip.style.color = 'var(--primary)';
                 tip.style.marginBottom = '12px';
                 tip.style.padding = '8px';
-                tip.style.background = 'rgba(14, 165, 233, 0.1)';
-                tip.style.borderRadius = '4px';
+                tip.style.background = 'var(--primary-soft)';
+                tip.style.borderRadius = 'var(--radius-sm)';
                 tip.innerHTML = 'ℹ️ <b>演示模式体验</b>：您可以自由配置进行体验，设置仅在当前会话生效，不会产生真实推送。';
                 const body = document.querySelector('#tg-modal .modal-body');
                 if (body) body.insertBefore(tip, body.firstChild);
@@ -1766,7 +1785,7 @@ async function loadMailboxes(options = {}){
             </div>
           </div>`
         )).join('');
-        els.mbList.innerHTML = html || '<div style="color:#94a3b8">暂无历史邮箱</div>';
+        els.mbList.innerHTML = html || '<div style="color:var(--text-muted)">暂无历史邮箱</div>';
         if (els.mbLoading) els.mbLoading.innerHTML = '';
         // 首屏用缓存渲染时，更新分页显示
         mbLastCount = Array.isArray(mbCached) ? mbCached.length : 0;
@@ -1848,7 +1867,7 @@ async function loadMailboxes(options = {}){
     }
   }catch(_){ 
     if (els.mbLoading) els.mbLoading.innerHTML = '';
-    els.mbList.innerHTML = '<div style="color:#dc2626">加载失败</div>'; 
+    els.mbList.innerHTML = '<div style="color:var(--danger)">加载失败</div>'; 
     // 加载失败时隐藏分页器
     mbLastCount = 0;
     updateMbPagination();
@@ -1975,7 +1994,7 @@ window.deleteMailbox = async (ev, address) => {
         
         // 如果删除的是当前选中的邮箱，清空相关状态
         if (window.currentMailbox === address){
-          els.list.innerHTML = '<div style="text-align:center;color:#64748b">📭 暂无邮件</div>';
+          els.list.innerHTML = '<div style="text-align:center;color:var(--text-muted)">📭 暂无邮件</div>';
           els.email.innerHTML = '<span class="placeholder-text">点击右侧生成按钮创建邮箱地址</span>';
           els.email.classList.remove('has-email');
           els.emailActions.style.display = 'none';
@@ -2239,7 +2258,8 @@ window.showSentEmail = async (id) => {
       <span class="modal-icon">📤</span>
       <span>${escapeHtml(email.subject || '(无主题)')}</span>
     `;
-    const bodyHtml = (email.html_content || email.text_content || '').toString();
+    const bodyHtml = (email.html_content || '').toString();
+    const bodyText = (email.text_content || '').toString();
     els.modalContent.innerHTML = `
       <div class="email-detail-container">
         <div class="email-meta-card">
@@ -2265,10 +2285,12 @@ window.showSentEmail = async (id) => {
           </div>
         </div>
         <div class="email-content-area">
-          ${bodyHtml ? `<div class="email-content-text">${bodyHtml}</div>` : '<div class="email-no-content">暂无内容</div>'}
+          <div id="sent-email-render-host"></div>
         </div>
       </div>
     `;
+    const host = document.getElementById('sent-email-render-host');
+    renderEmailBodyHost(host, bodyHtml, bodyText);
     els.modal.classList.add('show');
   } catch (e) { }
 }

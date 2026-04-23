@@ -16,6 +16,35 @@ if (!username || !pwd || !btn || !err) {
 
 let isSubmitting = false;
 
+const SAFE_REDIRECT_PATHS = new Set([
+  '/',
+  '/html/app.html',
+  '/html/mailbox.html',
+  '/html/mailboxes.html',
+  '/admin.html',
+  '/html/admin.html'
+]);
+
+function normalizeRedirectTarget(rawTarget) {
+  const fallback = '/';
+  try {
+    const value = String(rawTarget || '').trim();
+    if (!value) {
+      return fallback;
+    }
+    const targetUrl = new URL(value, location.origin);
+    if (targetUrl.origin !== location.origin) {
+      return fallback;
+    }
+    if (!SAFE_REDIRECT_PATHS.has(targetUrl.pathname)) {
+      return fallback;
+    }
+    return `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 // ensureToastContainer 函数已由 toast-utils.js 统一提供
 
 // showToast 函数已由 toast-utils.js 统一提供
@@ -58,7 +87,13 @@ async function doLogin(){
   try{
     // 目标页：优先使用登录页上的 redirect 参数
     const target = (function(){
-      try{ const u=new URL(location.href); const t=(u.searchParams.get('redirect')||'').trim(); return t || '/'; }catch(_){ return '/'; }
+      try{
+        const u = new URL(location.href);
+        const t = (u.searchParams.get('redirect') || '').trim();
+        return normalizeRedirectTarget(t || '/');
+      }catch(_){
+        return '/';
+      }
     })();
     
     // 等待登录请求完成，提高成功率
@@ -200,6 +235,7 @@ async function initLoginBanner() {
     if (needDemoBanner) {
       infoBannerTitle.textContent = '当前为官方体验站 / 共享环境，请勿存放或发送敏感信息。';
       infoBannerDesc.textContent = '该环境仅用于体验与演示，数据可能会定期清理。如需长期稳定使用，推荐 Fork 仓库自建部署。';
+      infoBanner.className = 'info-banner demo-mode';
       infoBanner.hidden = false;
       return;
     }
@@ -208,6 +244,7 @@ async function initLoginBanner() {
       infoBannerTitle.textContent = '当前为访客模式（权限受限）。';
       infoBannerDesc.textContent = '您可以使用访客账号体验主要功能，但部分管理与配置能力已关闭。如需完整权限，请使用管理员账号或自建部署。';
       infoBannerLink.style.display = 'none';
+      infoBanner.className = 'info-banner guest-mode';
       infoBanner.hidden = false;
       return;
     }

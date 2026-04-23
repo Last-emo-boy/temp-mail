@@ -12,6 +12,11 @@ let autoRefreshTimer = null;
 let progressTimer = null;
 let keyword = '';
 let selectedEmailId = null;
+let lastSelectedEmailEl = null;
+let searchDebounceTimer = null;
+let loadEmailsController = null;
+const emailDetailCache = new Map();
+let detailRequestToken = 0;
 
 // DOM 元素引用
 let elements = {};
@@ -171,8 +176,14 @@ function bindEvents() {
 
   // 搜索
   elements.searchBox?.addEventListener('input', (e) => {
-    keyword = e.target.value.trim().toLowerCase();
-    renderEmailList();
+    const value = e.target.value.trim().toLowerCase();
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+    }
+    searchDebounceTimer = setTimeout(() => {
+      keyword = value;
+      renderEmailList();
+    }, 120);
   });
   
   // 退出登录
@@ -242,15 +253,73 @@ async function loadEmails() {
   }
   
   try {
-    const res = await fetch(`/api/emails?mailbox=${encodeURIComponent(currentMailbox)}&limit=${pageSize}`);
+    if (loadEmailsController) {
+      loadEmailsController.abort();
+    }
+    const controller = new AbortController();
+    loadEmailsController = controller;
+
+    const res = await fetch(`/api/emails?mailbox=${encodeURIComponent(currentMailbox)}&limit=${pageSize}`, {
+      signal: controller.signal
+    });
     const data = await res.json();
+
+    if (loadEmailsController !== controller) {
+      return;
+    }
     
     emails = Array.isArray(data) ? data : (data?.emails || []);
+    const validIds = new Set(emails.map(e => Number(e.id)));
+    for (const id of emailDetailCache.keys()) {
+      if (!validIds.has(Number(id))) {
+        emailDetailCache.delete(id);
+      }
+    }
+    const hasSelected = emails.some(e => Number(e.id) === Number(selectedEmailId));
+    if (!hasSelected) {
+      selectedEmailId = null;
+      lastSelectedEmailEl = null;
+    }
     renderEmailList();
     updateStats();
   } catch (error) {
+    if (error && error.name === 'AbortError') {
+      return;
+    }
     console.error('加载邮件失败', error);
     showToast('加载邮件失败', 'error');
+  } finally {
+    if (loadEmailsController && loadEmailsController.signal.aborted) {
+      loadEmailsController = null;
+    }
+  }
+}
+
+async function resolveEmailDetail(email) {
+  const id = Number(email?.id || 0);
+  if (!id) {
+    return email;
+  }
+  if (email.html_content || email.content) {
+    emailDetailCache.set(id, email);
+    return email;
+  }
+  const cached = emailDetailCache.get(id);
+  if (cached) {
+    return { ...email, ...cached };
+  }
+
+  try {
+    const res = await fetch(`/api/email/${id}`);
+    if (!res.ok) {
+      return email;
+    }
+    const detail = await res.json();
+    const merged = { ...email, ...detail };
+    emailDetailCache.set(id, merged);
+    return merged;
+  } catch (_) {
+    return email;
   }
 }
 
@@ -281,6 +350,7 @@ function renderEmailList() {
   filteredEmails.forEach(email => {
     const el = document.createElement('div');
     el.className = `email-item ${selectedEmailId === email.id ? 'active' : ''}`;
+    el.dataset.emailId = String(email.id);
     el.onclick = () => selectEmail(email);
     
     // 头像颜色
@@ -307,36 +377,46 @@ function renderEmailList() {
 /**
  * 选择邮件
  */
-function selectEmail(email) {
+async function selectEmail(email) {
   selectedEmailId = email.id;
-  
-  // 标记选中状态
-  const items = document.querySelectorAll('.email-item');
-  items.forEach(el => el.classList.remove('active'));
-  // 重新渲染列表以更新选中态（稍微低效但简单）
-  renderEmailList(); 
+
+  // 标记选中状态（避免每次点击都重绘整个列表）
+  if (lastSelectedEmailEl) {
+    lastSelectedEmailEl.classList.remove('active');
+  }
+  const currentEl = elements.emailList?.querySelector(`.email-item[data-email-id="${String(email.id)}"]`);
+  if (currentEl) {
+    currentEl.classList.add('active');
+    lastSelectedEmailEl = currentEl;
+  }
+
+  const requestToken = ++detailRequestToken;
+  const detailedEmail = await resolveEmailDetail(email);
+  if (requestToken !== detailRequestToken || Number(selectedEmailId) !== Number(email.id)) {
+    return;
+  }
   
   const isMobile = window.innerWidth <= 768;
   
   if (isMobile) {
     // 移动端：打开模态框
-    renderDetailToContainer(elements.modalDetailContainer, email);
+    renderDetailToContainer(elements.modalDetailContainer, detailedEmail);
     elements.emailModal.classList.add('active');
   } else {
     // 桌面端：右侧显示
     elements.detailEmpty.classList.add('hidden');
     elements.detailContent.classList.remove('hidden');
     
-    elements.detailSubject.textContent = email.subject || '无主题';
-    elements.detailFrom.textContent = email.sender || '';
-    elements.detailDate.textContent = new Date(email.received_at).toLocaleString();
+    elements.detailSubject.textContent = detailedEmail.subject || '无主题';
+    elements.detailFrom.textContent = detailedEmail.sender || '';
+    elements.detailDate.textContent = new Date(detailedEmail.received_at).toLocaleString();
     
-    const senderName = email.sender || '';
+    const senderName = detailedEmail.sender || '';
     const avatarColor = getAvatarColor(senderName);
     elements.detailAvatar.style.background = avatarColor;
     elements.detailAvatar.textContent = getInitials(senderName);
-    
-    elements.detailBody.innerHTML = email.html_content || email.content || email.preview || '<p class="text-muted">无内容</p>';
+
+    renderSafeEmailBody(elements.detailBody, detailedEmail.html_content, detailedEmail.content || detailedEmail.preview || '');
   }
 }
 
@@ -359,10 +439,94 @@ function renderDetailToContainer(container, email) {
         </div>
       </div>
     </div>
-    <div class="email-detail-body">
-      ${bodyContent || '<p class="text-muted">无内容</p>'}
-    </div>
+    <div class="email-detail-body" id="modal-email-body"></div>
   `;
+
+  const modalBody = container.querySelector('#modal-email-body');
+  renderSafeEmailBody(modalBody, bodyContent, bodyContent);
+}
+
+function buildSafeEmailSrcdoc(rawHtml) {
+  const content = String(rawHtml || '');
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base target="_blank">
+  <style>
+    :root { color-scheme: light; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff !important;
+      color: #1e293b !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    body, p, span, div, td, th, li { color: #1e293b !important; }
+    a { color: #2563eb !important; }
+    pre, code {
+      color: #1e293b !important;
+      background: #f1f5f9 !important;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    img, table { max-width: 100% !important; }
+  </style>
+</head>
+<body>${content}</body>
+</html>`;
+}
+
+function renderSafeEmailBody(container, rawHtml, rawText) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const html = String(rawHtml || '');
+  const text = String(rawText || '');
+
+  if (html.trim()) {
+    const iframe = document.createElement('iframe');
+    iframe.style.width = '100%';
+    iframe.style.border = '0';
+    iframe.style.minHeight = '56vh';
+    iframe.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    iframe.srcdoc = buildSafeEmailSrcdoc(html);
+    container.appendChild(iframe);
+
+    const resize = () => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        const height = Math.max(
+          doc?.body?.scrollHeight || 0,
+          doc?.documentElement?.scrollHeight || 0,
+          360
+        );
+        iframe.style.height = `${height}px`;
+      } catch (_) {}
+    };
+
+    iframe.addEventListener('load', resize);
+    setTimeout(resize, 80);
+    return;
+  }
+
+  if (text.trim()) {
+    const pre = document.createElement('pre');
+    pre.className = 'email-detail-pre';
+    pre.className = 'email-detail-pre';
+    pre.textContent = text;
+    container.appendChild(pre);
+    return;
+  }
+
+  const empty = document.createElement('p');
+  empty.className = 'text-muted';
+  empty.textContent = '无内容';
+  container.appendChild(empty);
 }
 
 /**

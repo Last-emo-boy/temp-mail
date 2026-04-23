@@ -96,7 +96,7 @@ function renderGrid(items){
     <div class="mailbox-card" data-address="${x.address}">
       <div class="line addr" title="${x.address}">${x.address}</div>
       <div class="line pwd" title="${x.password_is_default ? '默认密码（邮箱本身）' : '自定义密码'}">密码：${x.password_is_default ? '默认' : '自定义'}</div>
-      <div class="line login" title="邮箱登录权限">登录：${x.can_login ? '<span style="color:#16a34a">&#10003;允许</span>' : '<span style="color:#dc2626">&#10007;禁止</span>'}</div>
+      <div class="line login" title="邮箱登录权限">登录：${x.can_login ? '<span style="color:var(--success)">&#10003;允许</span>' : '<span style="color:var(--danger)">&#10007;禁止</span>'}</div>
       <div class="line time" title="${fmt(x.created_at)}">创建：${fmt(x.created_at)}</div>
       ${x.is_pinned ? '<div class="pin-badge" title="已置顶">📌</div>' : ''}
       <div class="actions">
@@ -117,7 +117,7 @@ function renderList(items){
         <div class="addr" title="${x.address}">${x.address}</div>
         <div class="meta">
           <span class="pwd" title="${x.password_is_default ? '默认密码（邮箱本身）' : '自定义密码'}">密码：${x.password_is_default ? '默认' : '自定义'}</span>
-          <span class="login" title="邮箱登录权限">登录：${x.can_login ? '<span style="color:#16a34a">&#10003;允许</span>' : '<span style="color:#dc2626">&#10007;禁止</span>'}</span>
+          <span class="login" title="邮箱登录权限">登录：${x.can_login ? '<span style="color:var(--success)">&#10003;允许</span>' : '<span style="color:var(--danger)">&#10007;禁止</span>'}</span>
           <span class="time" title="${fmt(x.created_at)}">创建：${fmt(x.created_at)}</span>
         </div>
       </div>
@@ -1591,11 +1591,11 @@ function updateBatchCountInfo() {
   
   if (count > 0) {
     countInfo.textContent = `已识别 ${count} 个有效邮箱地址`;
-    countInfo.style.color = '#16a34a';
+    countInfo.style.color = 'var(--success)';
     confirmBtn.disabled = false;
   } else {
     countInfo.textContent = '输入邮箱后将显示数量统计';
-    countInfo.style.color = '#64748b';
+    countInfo.style.color = 'var(--text-muted)';
     confirmBtn.disabled = true;
   }
 }

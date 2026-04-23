@@ -320,7 +320,7 @@ async function loadUsers(page = currentPage){
     updateUsersCountDisplay();
     
   }catch(e){ 
-    els.usersTbody.innerHTML = '<tr><td colspan="6" style="color:#dc2626">加载失败</td></tr>';
+    els.usersTbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger)">加载失败</td></tr>';
   }
   finally { if (els.usersLoading){ els.usersLoading.style.display = 'none'; } }
 }
@@ -379,7 +379,7 @@ async function loadUserMailboxes(userId, username, page = currentMailboxPage, bt
       paginatedMailboxes.map(x => {
         const safeAddress = escapeHtml(x.address);
         return `
-        <div class="user-mailbox-item" onclick="selectMailboxAndGoToHomepage('${safeAddress}', event)" style="cursor: pointer;" title="点击跳转到该邮箱">
+        <div class="user-mailbox-item" onclick="selectMailboxAndGoToHomepage('${safeAddress}', event)" title="点击跳转到该邮箱">
           <div class="mailbox-content">
             <span class="addr" title="${safeAddress}">${safeAddress}</span>
             <span class="time">${formatTs(x.created_at)}</span>
@@ -405,7 +405,7 @@ async function loadUserMailboxes(userId, username, page = currentMailboxPage, bt
       errorMsg += ': ' + safeMessage;
     }
     showToast(errorMsg,'warn'); 
-    els.userMailboxes.innerHTML = `<div style="color:#dc2626;padding:12px">加载失败: ${safeMessage}</div>`;
+    els.userMailboxes.innerHTML = `<div style="color:var(--danger);padding:12px">加载失败: ${safeMessage}</div>`;
     // 隐藏分页和数量显示
     if (els.mailboxesPagination) els.mailboxesPagination.style.display = 'none';
     if (els.mailboxesCount) els.mailboxesCount.textContent = '（0 邮箱）';
@@ -442,14 +442,14 @@ async function reloadCurrentUserMailboxes() {
       const numericUserId = Number(currentViewingUser.userId);
       if (isNaN(numericUserId) || numericUserId <= 0) {
         currentViewingUser = null;
-        els.userMailboxes.innerHTML = '<div style="color:#dc2626;padding:12px">用户ID无效，请重新选择用户</div>';
+        els.userMailboxes.innerHTML = '<div style="color:var(--danger);padding:12px">用户ID无效，请重新选择用户</div>';
         return;
       }
       
       await loadUserMailboxes(numericUserId, currentViewingUser.username, currentMailboxPage);
     } catch (e) {
       const safeMessage = escapeHtml(e.message || '未知错误');
-      els.userMailboxes.innerHTML = `<div style="color:#dc2626;padding:12px">重新加载失败: ${safeMessage}</div>`;
+      els.userMailboxes.innerHTML = `<div style="color:var(--danger);padding:12px">重新加载失败: ${safeMessage}</div>`;
     }
   } else {
     // 清除高亮并隐藏邮箱相关UI
@@ -569,7 +569,7 @@ async function loadDomainUsage() {
       const statusClass = active ? 'status-ok' : 'status-warn';
       return (
         '<tr>' +
-          '<td style="padding:4px 6px;font-family:monospace;">' + escapeHtml(d) + '</td>' +
+          '<td style="padding:4px 6px;font-family:var(--font-mono);">' + escapeHtml(d) + '</td>' +
           '<td style="padding:4px 6px;text-align:right;">' + c + '</td>' +
           '<td style="padding:4px 6px;text-align:right;">' + mc + '</td>' +
           '<td style="padding:4px 6px;text-align:center;"><span class="' + statusClass + '">' + statusText + '</span></td>' +
@@ -580,16 +580,16 @@ async function loadDomainUsage() {
     const active = Number(data.active || 0);
     const inactive = Number(data.inactive || 0);
     const summary = (
-      '<div style="margin-bottom:8px;color:#64748b;">' +
+      '<div style="margin-bottom:8px;color:var(--text-muted);">' +
         '活跃域名 ' + active + ' 个，已失效 ' + inactive + ' 个，总计 ' + total + ' 个' +
       '</div>'
     );
     els.domainUsageBody.innerHTML =
       summary +
-      '<div style="max-height:220px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;">' +
+      '<div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:6px;">' +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
           '<thead>' +
-            '<tr style="background:#f8fafc;">' +
+            '<tr style="background:var(--surface-alt);">' +
               '<th style="padding:4px 6px;text-align:left;">域名</th>' +
               '<th style="padding:4px 6px;text-align:right;">邮箱数量</th>' +
               '<th style="padding:4px 6px;text-align:right;">邮件数量</th>' +
@@ -611,29 +611,19 @@ function setTelegramStatusBadge(state) {
   const el = els.telegramStatusBadge;
   if (state === 'ok') {
     el.textContent = '已连接';
-    el.style.background = 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(22,163,74,0.1))';
-    el.style.color = '#16a34a';
-    el.style.borderColor = 'rgba(34,197,94,0.4)';
+    el.className = 'telegram-info-value status-ok';
   } else if (state === 'warn') {
     el.textContent = '需关注';
-    el.style.background = 'linear-gradient(135deg, rgba(234,179,8,0.18), rgba(202,138,4,0.12))';
-    el.style.color = '#ca8a04';
-    el.style.borderColor = 'rgba(234,179,8,0.5)';
+    el.className = 'telegram-info-value status-warning';
   } else if (state === 'error') {
     el.textContent = '异常';
-    el.style.background = 'linear-gradient(135deg, rgba(248,113,113,0.2), rgba(220,38,38,0.14))';
-    el.style.color = '#dc2626';
-    el.style.borderColor = 'rgba(248,113,113,0.6)';
+    el.className = 'telegram-info-value status-error';
   } else if (state === 'disabled') {
     el.textContent = '未启用';
-    el.style.background = 'linear-gradient(135deg, rgba(148,163,184,0.18), rgba(148,163,184,0.08))';
-    el.style.color = '#64748b';
-    el.style.borderColor = 'rgba(148,163,184,0.5)';
+    el.className = 'telegram-info-value';
   } else {
     el.textContent = '检查中';
-    el.style.background = '';
-    el.style.color = '';
-    el.style.borderColor = '';
+    el.className = 'telegram-info-value';
   }
 }
 
@@ -859,7 +849,7 @@ window.deleteUser = async (userId) => {
     if (currentViewingUser && currentViewingUser.userId === parseInt(userId)) {
       currentViewingUser = null;
     }
-    els.userMailboxes.innerHTML = '<div style="color:#666;padding:12px">请选择用户查看邮箱列表</div>';
+    els.userMailboxes.innerHTML = '<div style="color:var(--text-muted);padding:12px">请选择用户查看邮箱列表</div>';
     await loadUsers();
   }catch(e){ showToast('删除失败：' + (e?.message||e), 'warn'); }
 }
@@ -1143,7 +1133,7 @@ els.logout.onclick = async () => {
 };
 
 // 设置邮箱列表的初始提示
-els.userMailboxes.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">请点击用户列表中的"邮箱"按钮查看用户邮箱</div>';
+els.userMailboxes.innerHTML = '<div style="color:var(--text-muted);padding:12px;text-align:center;">请点击用户列表中的"邮箱"按钮查看用户邮箱</div>';
 // 初始化邮箱数量显示
 if (els.mailboxesCount) els.mailboxesCount.textContent = '（0 邮箱）';
 
